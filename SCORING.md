@@ -1,58 +1,180 @@
-# ROIbot — Scoring Engine v1 (deterministic; the math decides)
+# ROIbot Scoring Spec — v2
 
-## Inputs — 6 fields
-UseCase     : free text — LLM explanation ONLY, never scored
-Volume      : monthly number — how many times the workflow happens per month
-ValuePerRun : TRIVIAL(<$1) | LOW($1–10) | MED($10–100) | HIGH($100+)
-              — what ONE instance is worth (labor saved or stakes if wrong)
-DataReady   : READY | MESSY | UNSURE
-Constraint  : NONE | PRIVACY | TIMELINE | NO_ENG | REGULATION
-Budget      : MICRO(<$5K) | SMALL($5-25K) | MID($25-100K) | LARGE($100K+)
+> **Principle:** Math decides the verdict. The LLM only explains it.
 
-## Field collection note (UX)
-ValuePerRun must be asked in plain language, not as a dollar input:
-"If you handled one of these manually, what's it worth — in time spent or
-cost if it goes wrong?" with the four bands as gut-feel options.
+## Overview
 
-## AXIS A — Worth It (0–100) = volume × value  [heaviest gate]
-Volume (0–50):       <100 -> 8  | 100–999 -> 25 | 1K–9.9K -> 42 | 10K+ -> 50
-ValuePerRun (0–50):  TRIVIAL -> 5 | LOW -> 18 | MED -> 38 | HIGH -> 50
-WorthIt = volume_pts + value_pts
+14 inputs → 4 composite scores → hard gates → decision matrix → optional feasibility downgrade → final verdict.
 
-## AXIS B — Needs Custom (0–100) = resistance to off-the-shelf
-Constraint: REGULATION -> 80 | PRIVACY -> 70 | NONE -> 25 | TIMELINE -> 20 | NO_ENG -> 15
+All weights, subscores, and thresholds live in `lib/scoring.config.ts`. Edit only that file to tune behaviour.
 
-## Feasibility gate (constrains HOW, not WHETHER)
-CannotBuild = (Budget == MICRO) OR (Constraint == NO_ENG) OR (Constraint == TIMELINE)
-Budget and these constraints NEVER inflate a score — they only gate build options.
+---
 
-## Hard "Don't" gates — checked FIRST, any one fires -> DON'T
-G1  WorthIt < 30
-G2  ValuePerRun == TRIVIAL AND Volume < 1000
-G3  DataReady == MESSY AND WorthIt < 55
-    (G3 is soft: high-value cases survive with a "fix your data first" warning
-     instead of a DON'T)
+## Inputs (14)
 
-## Decision logic (order of operations)
-1. Check G1, G2, G3. If any fire -> DON'T. Stop.
-2. Else map (WorthIt, NeedsCustom):
-                   NeedsCustom <40   NeedsCustom 40–64   NeedsCustom 65+
-   WorthIt 30–64   BUY               HYBRID              HYBRID
-   WorthIt 65+     BUY               HYBRID              BUILD
-3. Apply feasibility gate:
-   BUILD  AND CannotBuild -> downgrade to HYBRID
-   HYBRID AND CannotBuild -> downgrade to BUY
-4. Confidence = distance to nearest verdict flip across all boundaries:
-   High >15pts | Medium 6–15 | Low <=5  -> state plainly.
+| # | Name | Type | Options |
+|---|------|------|---------|
+| 1 | workflowDescription | string | free text |
+| 2 | volume | VolumeRange | `<10` / `10-99` / `100-999` / `1000-9999` / `10000+` |
+| 3 | timePerRun | TimePerRun | `<2min` / `2-10min` / `10-30min` / `30-60min` / `60+min` |
+| 4 | laborCost | LaborCost | `<20` / `20-50` / `50-100` / `100+` ($/hr) |
+| 5 | errorImpact | ErrorImpact | `Low` / `Medium` / `High` / `Critical` |
+| 6 | repeatability | Repeatability | `AdHoc` / `Somewhat` / `Standardized` / `Highly` |
+| 7 | judgment | Judgment | `Critical` / `High` / `Moderate` / `Low` |
+| 8 | workflowNature | WorkflowNature | `Physical` / `Mixed` / `DigitalOps` / `DataProc` / `Knowledge` / `Communication` |
+| 9 | dataReadiness | DataReadiness | `Ready` / `Partial` / `Messy` / `Unknown` |
+| 10 | sensitivity | Sensitivity | `Public` / `Internal` / `Confidential` / `Regulated` |
+| 11 | integration | Integration | `Standalone` / `Few` / `Many` / `Enterprise` |
+| 12 | engCapacity | EngCapacity | `None` / `Limited` / `Moderate` / `Strong` |
+| 13 | budget | Budget | `Micro` / `Small` / `Medium` / `Large` |
+| 14 | timeline | Timeline | `Immediate` / `1month` / `3months` / `Flexible` |
 
-## Validation — these MUST pass (regression tests)
-Candle shop  : Vol 80,  LOW,  READY, NONE,       MICRO -> DON'T  (G1: WorthIt 26<30)
-Priya store  : Vol 3000,LOW,  READY, NONE,       SMALL -> BUY    (WorthIt 60, custom 25)
-Healthcare   : Vol 400, HIGH, READY, REGULATION, MID   -> BUILD  (WorthIt 75, custom 80)
-Healthcare-µ : Vol 400, HIGH, READY, REGULATION, MICRO -> HYBRID (BUILD downgraded, CannotBuild)
+---
 
-## IMPORTANT: weights are v1 guesses, not sacred
-These thresholds are research-informed but tuned to pass the cases above.
-They are EXPECTED to be adjusted after running 10–15 real workflows.
-Build them as easily-editable constants in one config file, not scattered
-magic numbers. Do not treat them as final.
+## Input Subscores
+
+```
+VOLUME_SCORES:        <10→0  | 10-99→20  | 100-999→50  | 1000-9999→80  | 10000+→100
+TIME_SCORES:          <2min→10 | 2-10min→35 | 10-30min→65 | 30-60min→90 | 60+min→100
+LABOR_SCORES:         <20→20 | 20-50→45 | 50-100→75 | 100+→100
+ERROR_SCORES:         Low→20 | Medium→55 | High→80 | Critical→100
+REPEATABILITY_SCORES: AdHoc→10 | Somewhat→45 | Standardized→80 | Highly→100
+JUDGMENT_SCORES:      Critical→10 | High→35 | Moderate→70 | Low→100   (suitability direction)
+JUDGMENT_RISK_SCORES: Critical→100 | High→70 | Moderate→35 | Low→10   (risk direction)
+NATURE_SCORES:        Physical→0 | Mixed→30 | DigitalOps→70 | DataProc→85 | Knowledge→90 | Communication→95
+DATA_SCORES:          Ready→100 | Partial→65 | Messy→30 | Unknown→15
+SENSITIVITY_SCORES:   Public→100 | Internal→70 | Confidential→40 | Regulated→10  (high = safe)
+INTEGRATION_SCORES:   Standalone→100 | Few→75 | Many→40 | Enterprise→15  (high = easy)
+ENG_CAPACITY_SCORES:  Strong→100 | Moderate→70 | Limited→35 | None→10
+BUDGET_SCORES:        Large→100 | Medium→70 | Small→40 | Micro→15
+TIMELINE_SCORES:      Flexible→100 | 3months→75 | 1month→40 | Immediate→10
+```
+
+---
+
+## Composite Scores (4)
+
+### 1. AutomationPotential (0–100)
+Measures whether the workflow is worth automating at all.
+
+```
+AP = 0.25×VOLUME + 0.20×TIME + 0.20×LABOR + 0.20×REPEATABILITY + 0.15×ERROR
+```
+
+### 2. AISuitability (0–100)
+Measures how well AI fits the work.
+
+```
+Suit = 0.40×NATURE + 0.35×JUDGMENT + 0.25×DATA
+```
+
+JUDGMENT uses `JUDGMENT_SCORES` (Critical→10, Low→100).
+
+### 3. RiskComplexity (0–100)
+Measures how risky or hard this will be to deploy safely.
+
+```
+Risk = 0.30×sensitivity_risk + 0.30×integration_risk + 0.20×ERROR + 0.20×judgment_risk
+```
+
+Where:
+- `sensitivity_risk = 100 - SENSITIVITY_SCORES[sensitivity]`
+- `integration_risk = 100 - INTEGRATION_SCORES[integration]`
+- JUDGMENT uses `JUDGMENT_RISK_SCORES` (Critical→100, Low→10)
+
+### 4. Feasibility (0–100)
+Measures whether the org can actually execute.
+
+```
+Feas = 0.30×BUDGET + 0.30×ENG_CAPACITY + 0.20×TIMELINE + 0.20×DATA
+```
+
+---
+
+## Hard Gates (checked in order)
+
+| Gate | Condition | Verdict |
+|------|-----------|---------|
+| G1 | volume = `<10` | DON'T |
+| G2 | AutomationPotential < 35 | DON'T |
+| G3 | DATA_SCORES < 50 AND AutomationPotential < 65 | DON'T |
+| G4 | workflowNature = `Physical` AND AutomationPotential < 60 | DON'T |
+
+If any gate fires, return DON'T immediately. Skip remaining gates and decision matrix.
+
+---
+
+## Decision Matrix
+
+Evaluated in priority order: BUILD → HYBRID → BUY.
+
+```
+BUILD  if: AP ≥ 65 AND Suit ≥ 75
+HYBRID if: (AP ≤ 64 AND Suit ≥ 60 AND Risk ≤ 45)  [HYBRID path 1]
+        OR (AP ≥ 65 AND Risk in 46–70)              [HYBRID path 2]
+BUY    — default (none of the above)
+```
+
+---
+
+## Feasibility Downgrade (single step, if/else-if)
+
+Applies only to BUILD and HYBRID verdicts. Checked once — does not cascade.
+
+```
+if budget ∈ {Micro, Small} OR engCapacity ∈ {None, Limited} OR timeline ∈ {Immediate, 1month}:
+  if verdict == BUILD  → downgrade to HYBRID
+  else if verdict == HYBRID → downgrade to BUY
+```
+
+---
+
+## humanReviewFlag
+
+Set `true` when any of:
+- `errorImpact` is `High` or `Critical`
+- `sensitivity` is `Regulated`
+- `judgment` is `Critical`
+- `riskComplexity > 70`
+
+---
+
+## Confidence
+
+Based on distance to nearest decision boundary. All four composite scores contribute.
+
+```
+High   — > 15 pts from any boundary
+Medium — 6–15 pts
+Low    — ≤ 5 pts
+```
+
+---
+
+## ROI Estimate
+
+Computed deterministically before the LLM call. LLM only writes it up.
+
+```
+annualRunsSaved  = VOLUME_COUNTS[volume] × 12 × ROI_SUCCESS_FACTOR
+hoursSaved       = annualRunsSaved × TIME_HOURS[timePerRun]
+annualSavingsMid = hoursSaved × LABOR_RATES[laborCost]
+annualSavingsLow = annualSavingsMid × (1 - ROI_RANGE_PCT)
+annualSavingsHigh = annualSavingsMid × (1 + ROI_RANGE_PCT)
+
+implCostMid  = IMPL_COSTS[verdict]
+paybackYears = implCostMid / annualSavingsMid   (null if annualSavingsMid == 0)
+```
+
+ROI is `null` when verdict is DON'T.
+
+---
+
+## Verdict Summary
+
+| Verdict | Meaning |
+|---------|---------|
+| DON'T | Not worth pursuing. Gate fired or scores too low. |
+| BUY | Use an off-the-shelf AI product. |
+| HYBRID | Buy a core product, add custom layers. |
+| BUILD | Custom in-house AI system needed. |

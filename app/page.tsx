@@ -10,10 +10,10 @@ export default function Home() {
           <Logo />
           <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
             <p style={{ fontSize: "1.75rem", fontWeight: 800, color: "#111827", lineHeight: 1.15, margin: 0, letterSpacing: "-0.02em" }}>
-              Not everything needs AI.
+              The smartest automation starts with a better question.
             </p>
             <p style={{ fontSize: "0.9rem", fontWeight: 400, color: "#6b7280", lineHeight: 1.55, margin: 0 }}>
-              Describe one workflow and get a straight verdict. Buy, build, or do nothing.
+              Should we buy it, build it, customize it, or leave it alone?
             </p>
           </div>
         </div>

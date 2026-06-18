@@ -13,3 +13,29 @@ body {
   background-color: #f9fafb; /* gray-50 */
   color: #111827;            /* gray-900 */
 }
+
+/* ── Print / PDF ─────────────────────────────────────────────────────────────*/
+
+@media print {
+  /* margin: 0 removes the browser margin boxes where URL/date/page number print */
+  @page { margin: 0; }
+
+  body { padding: 1.5cm; }
+
+  /* Hide controls that have no meaning on paper */
+  .no-print { display: none !important; }
+
+  /* Keep colors — ensures verdict card background prints */
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  /* Remove shadows and loosen spacing for paper layout */
+  * { box-shadow: none !important; }
+
+  body { background-color: #fff; }
+
+  /* Avoid breaking a section card across a page */
+  .print-section { page-break-inside: avoid; }
+
+  /* Give each major section a bit of breathing room */
+  main { padding: 1rem !important; }
+}

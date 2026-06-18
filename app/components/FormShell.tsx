@@ -2,16 +2,16 @@
 
 import { useState, useEffect, useRef } from "react";
 import InputForm    from "./InputForm";
-import VerdictPage  from "./VerdictPage";
+import VerdictPage  from "@/src/frontend/VerdictPage";
 import { encodeInputs, decodeInputs } from "@/lib/share";
-import type { ScoringInput }  from "@/lib/scoring";
-import type { ScoringResult } from "@/lib/scoring";
-import type { Explanation }   from "@/lib/explanation.types";
+import type { ScoringInput }  from "@/src/backend/scoring";
+import type { ScoringResult } from "@/src/backend/scoring";
+import type { Explanation, ReviewFlag } from "@/lib/explanation.types";
 
 type Phase =
   | { tag: "form" }
   | { tag: "loading" }
-  | { tag: "result"; result: ScoringResult; explanation: Explanation | null; shareUrl: string; input: ScoringInput };
+  | { tag: "result"; result: ScoringResult; explanation: Explanation | null; reviewFlags: ReviewFlag[]; shareUrl: string; input: ScoringInput };
 
 export default function FormShell() {
   const [phase, setPhase] = useState<Phase>({ tag: "form" });
@@ -48,7 +48,7 @@ export default function FormShell() {
         body:    JSON.stringify(input),
       });
       if (!res.ok) throw new Error(`API error ${res.status}`);
-      const { result, explanation } = await res.json();
+      const { result, explanation, reviewFlags } = await res.json();
 
       // Only update the URL once we have a result — this is the shareable link.
       // Setting it earlier (before the API returns) would cause auto-run on refresh
@@ -57,7 +57,7 @@ export default function FormShell() {
       const shareUrl = `${window.location.origin}${window.location.pathname}?r=${encoded}`;
       window.history.replaceState(null, "", shareUrl);
 
-      setPhase({ tag: "result", result, explanation, shareUrl, input });
+      setPhase({ tag: "result", result, explanation, reviewFlags: reviewFlags ?? [], shareUrl, input });
     } catch {
       setPhase({ tag: "form" });
       alert("Something went wrong. Please try again.");
@@ -101,6 +101,7 @@ export default function FormShell() {
       <VerdictPage
         result={phase.result}
         explanation={phase.explanation}
+        reviewFlags={phase.reviewFlags}
         shareUrl={phase.shareUrl}
         input={phase.input}
         onReset={reset}

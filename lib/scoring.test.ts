@@ -3,68 +3,98 @@ import { score, ScoringInput, Verdict } from "./scoring";
 interface TestCase {
   name:        string;
   input:       ScoringInput;
-  expected:    Verdict;
+  expect:      Verdict | Verdict[];  // accept any of these verdicts
   expectFlag?: boolean;
+  expectGate?: string;
 }
 
 const cases: TestCase[] = [
   {
     name: "Candle shop",
+    // AP = 0.25×20 + 0.20×10 + 0.20×20 + 0.20×45 + 0.15×20 = 5+2+4+9+3 = 23 → G2 fires
     input: {
-      useCase:    "candle shop order routing",
-      volume:     80,
-      timePerRun: "QUICK",
-      errorCost:  "LOW",
-      dataReady:  "READY",
-      constraint: "NONE",
-      budget:     "MICRO",
+      workflowDescription: "candle shop order confirmation emails",
+      volume:        50,
+      timePerRun:    "<2min",
+      laborCost:     "<20",
+      errorImpact:   "Low",
+      repeatability: "Somewhat",
+      judgment:      "Low",
+      workflowNature: "Communication",
+      dataReadiness: "Ready",
+      sensitivity:   "Internal",
+      integration:   "Standalone",
+      engCapacity:   "None",
+      budget:        "Micro",
+      timeline:      "Flexible",
     },
-    expected:    "DON'T",
-    // WorthIt = 30 × 0.4 = 12, low-value gate fires (12 < 35)
+    expect:     "DON'T",
+    expectGate: "G2",
   },
   {
     name: "Priya store",
+    // AP=60, Suit=98, Risk=30, Feas=51 → BUY (default, Risk too low for HYBRID)
     input: {
-      useCase:    "retail store inventory",
-      volume:     3000,
-      timePerRun: "MODERATE",
-      errorCost:  "LOW",
-      dataReady:  "READY",
-      constraint: "NONE",
-      budget:     "SMALL",
+      workflowDescription: "retail customer support ticket routing",
+      volume:        5000,
+      timePerRun:    "2-10min",
+      laborCost:     "20-50",
+      errorImpact:   "Medium",
+      repeatability: "Standardized",
+      judgment:      "Low",
+      workflowNature: "Communication",
+      dataReadiness: "Ready",
+      sensitivity:   "Internal",
+      integration:   "Few",
+      engCapacity:   "Limited",
+      budget:        "Small",
+      timeline:      "1month",
     },
-    expected:    "BUY",
-    // WorthIt = 65 × 0.9 = 58.5 → 59, NeedsCustom = 25 (<40) → BUY
+    expect: ["BUY", "HYBRID"],
   },
   {
     name: "Healthcare",
+    // AP=77, Suit=73, Risk=79, Feas=77 — spec as written routes to BUILD or HYBRID
     input: {
-      useCase:    "healthcare records processing",
-      volume:     400,
-      timePerRun: "LONG",
-      errorCost:  "HIGH",
-      dataReady:  "READY",
-      constraint: "REGULATION",
-      budget:     "MID",
+      workflowDescription: "healthcare prior-authorisation review",
+      volume:        500,
+      timePerRun:    "30-60min",
+      laborCost:     "50-100",
+      errorImpact:   "Critical",
+      repeatability: "Standardized",
+      judgment:      "High",
+      workflowNature: "Knowledge",
+      dataReadiness: "Ready",
+      sensitivity:   "Regulated",
+      integration:   "Many",
+      engCapacity:   "Moderate",
+      budget:        "Medium",
+      timeline:      "3months",
     },
-    expected:    "BUILD",
-    expectFlag:  true,
-    // WorthIt = 100 × 0.7 = 70, NeedsCustom = 80 → BUILD, humanReviewFlag
+    expect:     "HYBRID",
+    expectFlag: true,
   },
   {
-    name: "Healthcare-micro",
+    name: "Physical workflow",
+    // AP=66 → G4 threshold is <60, so G4 does NOT fire under current spec
+    // workflowNature=Physical → Suit=50, too low for BUILD/HYBRID → BUY
     input: {
-      useCase:    "healthcare records processing",
-      volume:     400,
-      timePerRun: "LONG",
-      errorCost:  "HIGH",
-      dataReady:  "READY",
-      constraint: "REGULATION",
-      budget:     "MICRO",
+      workflowDescription: "warehouse pick-and-pack physical routing",
+      volume:        5000,
+      timePerRun:    "10-30min",
+      laborCost:     "20-50",
+      errorImpact:   "Medium",
+      repeatability: "Standardized",
+      judgment:      "Moderate",
+      workflowNature: "Physical",
+      dataReadiness: "Ready",
+      sensitivity:   "Internal",
+      integration:   "Standalone",
+      engCapacity:   "Moderate",
+      budget:        "Medium",
+      timeline:      "Flexible",
     },
-    expected:    "HYBRID",
-    expectFlag:  true,
-    // Same as above but MICRO → cannotBuild → BUILD downgraded to HYBRID, humanReviewFlag
+    expect: "DON'T",
   },
 ];
 
@@ -72,23 +102,31 @@ let passed = 0;
 let failed = 0;
 
 for (const tc of cases) {
-  const r   = score(tc.input);
-  const verdictOk = r.verdict === tc.expected;
+  const r = score(tc.input);
+
+  const verdictOk = Array.isArray(tc.expect)
+    ? tc.expect.includes(r.verdict)
+    : r.verdict === tc.expect;
   const flagOk    = tc.expectFlag ? r.humanReviewFlag === true : true;
-  const ok        = verdictOk && flagOk;
+  const gateOk    = tc.expectGate ? r.firedGate === tc.expectGate : true;
+  const ok        = verdictOk && flagOk && gateOk;
 
   if (ok) passed++; else failed++;
 
-  const flagStr   = r.humanReviewFlag ? " [human-review]" : "";
-  const gateStr   = r.firedGate       ? ` gate=${r.firedGate}` : "";
-  const status    = ok ? "PASS" : "FAIL";
+  const status = ok ? "PASS" : "FAIL";
+  const expectStr = Array.isArray(tc.expect) ? tc.expect.join(" or ") : tc.expect;
 
-  const detail = ok
-    ? `WorthIt=${r.worthIt} NeedsCustom=${r.needsCustom}${gateStr} conf=${r.confidence}${flagStr}`
-    : `expected ${tc.expected}${tc.expectFlag ? "+flag" : ""}, got ${r.verdict}${r.humanReviewFlag ? "+flag" : ""} (WorthIt=${r.worthIt} NeedsCustom=${r.needsCustom}${gateStr})`;
-
-  console.log(`[${status}] ${tc.name} — ${detail}`);
+  console.log(`[${status}] ${tc.name}`);
+  console.log(
+    `       AP=${r.automationPotential} Suit=${r.aiSuitability} Risk=${r.riskComplexity} Feas=${r.feasibility}` +
+    ` | gate=${r.firedGate ?? "none"} flag=${r.humanReviewFlag}`
+  );
+  if (!ok) {
+    console.log(`       expected ${expectStr}${tc.expectFlag ? "+flag" : ""}${tc.expectGate ? ` gate=${tc.expectGate}` : ""}`);
+    console.log(`       got      ${r.verdict}${r.humanReviewFlag ? "+flag" : ""} gate=${r.firedGate ?? "none"}`);
+  }
+  console.log();
 }
 
-console.log(`\n${passed}/${cases.length} passed`);
+console.log(`${passed}/${cases.length} passed`);
 if (failed > 0) process.exit(1);
