@@ -27,7 +27,7 @@ interface Props {
   onReset:     () => void;
 }
 
-export default function VerdictPage({ result, explanation, reviewFlags, shareUrl, input, onReset }: Props) {
+export default function VerdictPage({ result, explanation, reviewFlags, input, onReset }: Props) {
   const p = PALETTE[result.verdict];
 
   return (
@@ -76,15 +76,6 @@ export default function VerdictPage({ result, explanation, reviewFlags, shareUrl
       {/* Actions — hidden in print */}
       <div className="no-print" style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", paddingTop: "0.5rem" }}>
         <PrintButton />
-        <button
-          onClick={() => {
-            const copied = navigator.clipboard.writeText(shareUrl);
-            void copied;
-          }}
-          style={actionBtn}
-        >
-          Copy shareable link
-        </button>
         <button onClick={onReset} style={actionBtn}>
           Analyze another workflow
         </button>
